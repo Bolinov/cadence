@@ -179,7 +179,11 @@ Loop:
 				break Loop
 			}
 			if filter(task) {
-				output.WriteString(fmt.Sprintf("%v\n", task.String()))
+				jsonStr, err := json.Marshal(task)
+				if err != nil {
+					fmt.Printf("failed to encode into json, err: %v", err)
+				}
+				output.WriteString(fmt.Sprintf("%v\n", jsonStr))
 			}
 		}
 	}
@@ -267,6 +271,7 @@ func AdminRereplicate(c *cli.Context) {
 	if err != nil {
 		ErrorAndExit("", err)
 	}
+
 	config := sarama.NewConfig()
 	config.Producer.RequiredAcks = sarama.WaitForAll
 	config.Producer.Return.Successes = true
@@ -283,6 +288,9 @@ func AdminRereplicate(c *cli.Context) {
 
 	// parse json input as replicaiton tasks
 	tasks, err := parseReplicationTask(in)
+	if err != nil {
+		ErrorAndExit("", err)
+	}
 
 	// publish to topic
 	for idx, t := range tasks {
@@ -315,7 +323,7 @@ func parseReplicationTask(in string) (tasks []*replicator.ReplicationTask, err e
 		t := &replicator.ReplicationTask{}
 		err := json.Unmarshal([]byte(line), t)
 		if err != nil {
-			fmt.Printf("line %v cannot be deserialized to replicaiton task.\n", idx)
+			fmt.Printf("line %v cannot be deserialized to replicaiton task: %v.\n", idx, line)
 			return nil, err
 		}
 		tasks = append(tasks, t)
@@ -339,7 +347,14 @@ func loadBrokers(hostFile string, cluster string) (brokers []string, err error) 
 	if len(clustersConfig.Clusters) != 0 {
 		config, ok := clustersConfig.Clusters[cluster]
 		if ok {
-			return config.Brokers, nil
+			brs := config.Brokers
+			for i, b := range brs {
+				if !strings.Contains(b, ":") {
+					b += ":9092"
+					brs[i] = b
+				}
+			}
+			return brs, nil
 		}
 	}
 	return nil, fmt.Errorf("failed to load broker for cluster %v", cluster)
